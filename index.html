@@ -491,7 +491,7 @@ $('#edSave').onclick=function(){if(saveEditor()){renderList();show('lib');}};
 $('#edRead').onclick=function(){var sc=saveEditor();if(sc)openReader(sc.id);};
 
 /* ---------- okuma ekranı ---------- */
-var R=$('#reader'),sc=$('#scroller'),C=$('#content'),cur=null;
+var R=$('#reader'),sc=$('#scroller'),C=$('#content'),cur=null,curWords=0;
 var playing=false,last=0,y=0,lastSet=-1,elapsed=0,lockWake=null,hideT=null,counting=false;
 function applyS(){
   var st=document.documentElement.style;
@@ -505,7 +505,7 @@ function applyS(){
   $('#rG').value=S.guide;$('#oG').textContent='%'+S.guide;
   $('#tGuide').checked=!!S.showGuide;$('#tCount').checked=!!S.countdown;$('#tCenter').checked=!!S.center;$('#tMirror').checked=!!S.mirror;
 }
-function toast(t){var el=$('#toast');el.textContent=t;el.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(function(){el.hidden=true;},1400);}
+function toast(t){var el=$('#toast');el.textContent=t;el.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(function(){el.hidden=true;},2200);}
 function setSpeed(v){S.speed=Math.max(1,Math.min(15,v));applyS();saveS();toast('Hız '+S.speed);}
 function setFs(v){var guideEl=currentAnchor();S.fs=Math.max(16,Math.min(96,v));applyS();saveS();keepAnchor(guideEl);toast('Yazı '+S.fs);}
 function currentAnchor(){var gy=sc.clientHeight*S.guide/100,best=null;var ps=C.children;for(var i=0;i<ps.length;i++){var r=ps[i].getBoundingClientRect();if(r.bottom>gy){best=ps[i];break;}}return best;}
@@ -517,7 +517,7 @@ function openReader(id,startEdit){
   C.innerHTML=htmlOf(cur);
   if(!C.querySelector('h1')&&cur.title){var h=document.createElement('h1');h.textContent=cur.title;C.insertBefore(h,C.firstChild);}
   $('#rTitle').textContent=cur.title||'';
-  rewrap();show('reader');sc.scrollTop=0;y=0;elapsed=0;setPos(0,true);updateClock();uiShow(true);
+  curWords=wordCount(cur);rewrap();show('reader');sc.scrollTop=0;y=0;elapsed=0;setPos(0,true);updateClock();uiShow(true);
   if(startEdit)setEdit(true);
 }
 function stopAll(){if(playing)setPlay(false);if(listening)toggleMic();if(editing)setEdit(false);}
@@ -548,7 +548,7 @@ var lastMode='auto';
 function updateClock(){
   var s=Math.floor(elapsed/1000),mm=String(Math.floor(s/60)).padStart(2,'0'),ss=String(s%60).padStart(2,'0');
   var max=sc.scrollHeight-sc.clientHeight,frac=max>0?Math.min(1,sc.scrollTop/max):0;
-  var rem=Math.max(0,Math.round((1-frac)*(cur?wordCount(cur):0)/WPM));
+  var rem=Math.max(0,Math.round((1-frac)*curWords/WPM));
   $('#clock').innerHTML='<b>'+mm+':'+ss+'</b> · ~'+rem+' dk kaldı';
   $('#prog').style.width=(frac*100)+'%';
 }
@@ -556,6 +556,7 @@ sc.addEventListener('scroll',function(){if(!playing)updateClock();},{passive:tru
 
 /* kontrollerin görünmesi */
 function uiShow(stay){R.classList.remove('hideUI');clearTimeout(hideT);if(!stay&&playing)uiAutoHide();}
+function uiAutoHide3(){clearTimeout(hideT);hideT=setTimeout(function(){if((playing||listening)&&$('#sheet').hidden)R.classList.add('hideUI');},3500);}
 function uiAutoHide(){clearTimeout(hideT);hideT=setTimeout(function(){if((playing||listening)&&$('#sheet').hidden)R.classList.add('hideUI');},1800);}
 R.addEventListener('mousemove',function(){if(playing||listening)uiShow();});
 
@@ -567,7 +568,11 @@ sc.addEventListener('pointerup',function(e){
   if(Math.abs(e.clientX-tx)>12||Math.abs(e.clientY-ty)>12||Date.now()-tt>600)return;
   if(Date.now()-lastTap<300)return;lastTap=Date.now();
   var t=e.target;
-  if(listening&&t.classList&&t.classList.contains('w')){var wi=words.indexOf(t);for(var i=0;i<tokens.length;i++){if(tokens[i].wi>=wi){setPos(i);return;}}return;}
+  if(listening){
+    if(R.classList.contains('hideUI')){uiShow();uiAutoHide3();return;} // önce düğmeleri göster
+    if(t.classList&&t.classList.contains('w')){var wi=words.indexOf(t);for(var i=0;i<tokens.length;i++){if(tokens[i].wi>=wi){setPos(i);toast('Buradan devam');break;}}uiAutoHide3();return;}
+    toggleMic();return; // boş yere dokunuş: dinlemeyi durdur
+  }
   togglePlay();
 });
 
@@ -616,7 +621,7 @@ function setEdit(on){
   if(on){if(playing)setPlay(false);if(listening)toggleMic();unwrap();C.contentEditable='true';$('#editBtn').classList.add('on');$('#editBtn').textContent='✓ Bitti';toast('Metne dokun ve yaz');uiShow(true);}
   else{C.contentEditable='false';if(document.activeElement)document.activeElement.blur();$('#editBtn').classList.remove('on');$('#editBtn').textContent='✏️ Düzenle';
     if(cur){var c=C.cloneNode(true);var h1=c.querySelector('h1');if(h1&&cur.text!=null)h1.remove();cur.html=c.innerHTML;delete cur.text;cur.updated=Date.now();saveScripts();}
-    rewrap();setPos(Math.min(pos,tokens.length),true);toast('Kaydedildi');}
+    curWords=wordCount(cur);rewrap();setPos(Math.min(pos,tokens.length),true);toast('Kaydedildi');}
 }
 $('#editBtn').onclick=function(){setEdit(!editing);};
 
@@ -631,7 +636,7 @@ function wrapNode(node,isAr){
     node.parentNode.replaceChild(frag,node);
   }else if(node.nodeType===1){var ar=isAr||node.classList.contains('ar');Array.prototype.slice.call(node.childNodes).forEach(function(c){wrapNode(c,ar);});}
 }
-function rewrap(){words=[];tokens=[];wrapNode(C,false);}
+function rewrap(){words=[];tokens=[];markedW=-1;wrapNode(C,false);}
 function unwrap(){C.querySelectorAll('span.w').forEach(function(s){s.replaceWith(document.createTextNode(s.textContent));});C.normalize();}
 function lev(a,b){if(Math.abs(a.length-b.length)>1)return 2;var m=[],i,j;for(i=0;i<=a.length;i++)m[i]=[i];for(j=0;j<=b.length;j++)m[0][j]=j;for(i=1;i<=a.length;i++)for(j=1;j<=b.length;j++)m[i][j]=Math.min(m[i-1][j]+1,m[i][j-1]+1,m[i-1][j-1]+(a[i-1]===b[j-1]?0:1));return m[a.length][b.length];}
 function sim(a,b){if(a===b)return 1;if(a.length>=4&&b.length>=4&&a.slice(0,4)===b.slice(0,4))return 1;if(a.length>=5&&lev(a,b)<=1)return 1;return 0;}
@@ -641,23 +646,51 @@ function track(text){
   for(var e=lo;e<=hi;e++){var s=0;for(var k=0;k<H.length&&e-k>=0;k++)s+=sim(H[H.length-1-k],tokens[e-k].n);var need=(e-pos<=4)?1:2;if(s>=need&&(s>bestScore||(s===bestScore&&best<pos))){bestScore=s;best=e;}}
   if(best>=0&&best+1>pos)setPos(best+1);
 }
+var markedW=-1; // şu an "cur" olan kelime
+function markTo(curW){
+  var i;
+  if(markedW<0){for(i=0;i<words.length;i++){words[i].classList.toggle('done',i<curW);words[i].classList.remove('cur');}}
+  else if(curW>markedW){for(i=Math.max(0,markedW);i<curW&&i<words.length;i++){words[i].classList.add('done');words[i].classList.remove('cur');}}
+  else if(curW<markedW){for(i=curW;i<=markedW&&i<words.length;i++){words[i].classList.remove('done');words[i].classList.remove('cur');}}
+  if(words[curW])words[curW].classList.add('cur');
+  markedW=curW;
+}
 function setPos(p,noScroll){
   pos=Math.min(p,tokens.length);var curW=pos<tokens.length?tokens[pos].wi:words.length;
-  if(listening||noScroll){for(var i=0;i<words.length;i++){words[i].classList.toggle('done',i<curW);words[i].classList.toggle('cur',i===curW);}}
+  markTo(curW);
   if(noScroll)return;
   var el=pos<tokens.length?tokens[pos].el:words[words.length-1];if(!el)return;
   target=Math.max(0,el.getBoundingClientRect().top-sc.getBoundingClientRect().top+sc.scrollTop-sc.clientHeight*S.guide/100);
   if(!anim){anim=true;requestAnimationFrame(glide);}
 }
-function glide(){var d=target-sc.scrollTop;if(Math.abs(d)<1||!listening){anim=false;return;}sc.scrollTop+=d*0.12;updateClock();requestAnimationFrame(glide);}
+function glide(){var d=target-sc.scrollTop;if(Math.abs(d)<1||!listening){anim=false;return;}sc.scrollTop+=Math.sign(d)*Math.max(1,Math.abs(d)*0.12);requestAnimationFrame(glide);}
 var SR=window.SpeechRecognition||window.webkitSpeechRecognition,rec=null,listening=false,micStart=0;
 if(!SR)$('#micBtn').hidden=true;
+var pendingText='',trackQueued=false,recStarted=0,quickEnds=0,okCount=0,lastErr='',restartT=null;
+function begin(){recStarted=Date.now();okCount=0;try{rec.start();}catch(e){}}
+function stopMic(msg){if(!listening)return;listening=false;clearTimeout(restartT);try{rec&&rec.abort();}catch(e){}wake(false);uiShow(true);clearInterval(micTick);micUI();if(msg)toast(msg);}
 function startRec(){
+  quickEnds=0;lastErr='';
   rec=new SR();rec.lang='tr-TR';rec.continuous=true;rec.interimResults=true;
-  rec.onresult=function(ev){var t='';for(var i=ev.resultIndex;i<ev.results.length;i++)t+=ev.results[i][0].transcript+' ';track(t);};
-  rec.onerror=function(e){if(e.error==='not-allowed'||e.error==='service-not-allowed'){listening=false;micUI();toast('Mikrofon izni verilmedi');}};
-  rec.onend=function(){if(listening){try{rec.start();}catch(e){}}};
-  try{rec.start();}catch(e){}
+  rec.onresult=function(ev){
+    var n=ev.results.length,t='';
+    for(var i=Math.max(ev.resultIndex,n-2);i<n;i++)t+=ev.results[i][0].transcript+' ';
+    pendingText=t;okCount++;
+    if(!trackQueued){trackQueued=true;requestAnimationFrame(function(){trackQueued=false;if(listening&&pendingText)track(pendingText);});}
+  };
+  rec.onerror=function(e){
+    lastErr=e.error;
+    if(e.error==='not-allowed'||e.error==='service-not-allowed'){stopMic('Mikrofon izni verilmedi');}
+    else if(e.error==='audio-capture'){stopMic('Mikrofon bulunamadı');}
+  };
+  rec.onend=function(){
+    if(!listening)return;
+    var now=Date.now();
+    quickEnds=(now-recStarted<1500&&!okCount)?quickEnds+1:0;
+    if(quickEnds>=4){stopMic(lastErr==='network'?'Sesle takip için internet gerekli':'Mikrofon açılamadı, tekrar dene');return;}
+    clearTimeout(restartT);restartT=setTimeout(function(){if(listening)begin();},quickEnds?600*quickEnds:250);
+  };
+  begin();
 }
 function micUI(){$('#micBtn').classList.toggle('on',listening);$('#micBtn').textContent=listening?'■ Dinliyor':'🎤 Sesle';R.classList.toggle('voice',listening);}
 var micTick=null;
@@ -665,7 +698,7 @@ function toggleMic(){
   if(!SR)return;
   listening=!listening;
   if(listening){if(playing)setPlay(false);if(editing)setEdit(false);startRec();setPos(pos);wake(true);uiAutoHide();micStart=Date.now()-elapsed;micTick=setInterval(function(){elapsed=Date.now()-micStart;updateClock();},500);toast('Dinliyorum, okumaya başla');}
-  else{try{rec.stop();}catch(e){}wake(false);uiShow(true);clearInterval(micTick);}
+  else{listening=true;stopMic();return;}
   micUI();
 }
 $('#micBtn').onclick=function(){lastMode=listening?'auto':'mic';toggleMic();};
